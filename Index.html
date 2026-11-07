@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <title>音訊正倒放工具</title>
+  <style>
+    body { font-family: system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; gap: 16px; background: #f4f4f5; }
+    .card { background: white; padding: 24px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); display: flex; flex-direction: column; gap: 12px; width: 320px; }
+    button { padding: 10px 16px; border: none; border-radius: 8px; font-size: 15px; cursor: pointer; transition: 0.2s; background: #2563eb; color: white; }
+    button:disabled { background: #cbd5e1; cursor: not-allowed; }
+    button.record { background: #dc2626; }
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <button id="btnRecord" class="record">開始錄音</button>
+  <button id="btnPlayForward" disabled>正向播放 ▶</button>
+  <button id="btnPlayBackward" disabled>倒著播放 ◀</button>
+  <p id="status" style="font-size: 13px; color: #64748b; text-align: center;">點擊開始錄製聲音</p>
+</div>
+
+<script>
+  let mediaRecorder;
+  let audioChunks = [];
+  let audioContext;
+  let audioBuffer = null;
+  let currentSource = null;
+
+  const btnRecord = document.getElementById('btnRecord');
+  const btnForward = document.getElementById('btnPlayForward');
+  const btnBackward = document.getElementById('btnPlayBackward');
+  const status = document.getElementById('status');
+
+  btnRecord.onclick = async () => {
+    if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    
+    if (mediaRecorder && mediaRecorder.state === 'recording') {
+      mediaRecorder.stop();
+      btnRecord.textContent = '重新錄音';
+      btnRecord.classList.remove('record');
+      status.textContent = '處理音訊中...';
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRecorder = new MediaRecorder(stream);
+      audioChunks = [];
+
+      mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+        const arrayBuffer = await audioBlob.arrayBuffer();
+        audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+        
+        btnForward.disabled = false;
+        btnBackward.disabled = false;
+        status.textContent = `錄音完成（長度: ${audioBuffer.duration.toFixed(1)} 秒）`;
+      };
+
+      mediaRecorder.start();
+      btnRecord.textContent = '停止錄音 ⏹';
+      status.textContent = '錄音中...';
+    } catch (err) {
+      status.textContent = '無法取得麥克風權限';
+    }
+  };
+
+  function playAudio(isReversed = false) {
+    if (!audioBuffer) return;
+    if (currentSource) currentSource.stop();
+
+    const numberOfChannels = audioBuffer.numberOfChannels;
+    const playBuffer = audioContext.createBuffer(
+      numberOfChannels,
+      audioBuffer.length,
+      audioBuffer.sampleRate
+    );
+
+    // 複製並決定是否反轉聲道資料
+    for (let channel = 0; channel < numberOfChannels; channel++) {
+      const sourceData = audioBuffer.getChannelData(channel);
+      const targetData = playBuffer.getChannelData(channel);
+
+      if (isReversed) {
+        for (let i = 0; i < audioBuffer.length; i++) {
+          targetData[i] = sourceData[audioBuffer.length - 1 - i];
+        }
+      } else {
+        targetData.set(sourceData);
+      }
+    }
+
+    currentSource = audioContext.createBufferSource();
+    currentSource.buffer = playBuffer;
+    currentSource.connect(audioContext.destination);
+    currentSource.start();
+  }
+
+  btnForward.onclick = () => playAudio(false);
+  btnBackward.onclick = () => playAudio(true);
+</script>
+
+</body>
+</html>
